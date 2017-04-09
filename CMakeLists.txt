@@ -19,8 +19,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 #
-add_library (NuklearUI STATIC NuklearUI.h NuklearUI.cpp nuklear/nuklear.h)
-target_compile_definitions(NuklearUI
+add_library (AtomicNuklearUI STATIC AtomicNuklearUI.h AtomicNuklearUI.cpp nuklear/nuklear.h)
+target_compile_definitions(AtomicNuklearUI
     PUBLIC
     -DNK_INCLUDE_VERTEX_BUFFER_OUTPUT=1
     -DNK_INCLUDE_FONT_BAKING=1
@@ -30,4 +30,4 @@ target_compile_definitions(NuklearUI
     -DNK_INCLUDE_FIXED_TYPES=1
     -DNK_INCLUDE_DEFAULT_ALLOCATOR=1
 )
-target_link_libraries (NuklearUI Atomic)
+target_link_libraries (AtomicNuklearUI Atomic)

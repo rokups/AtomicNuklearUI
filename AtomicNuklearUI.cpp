@@ -27,7 +27,7 @@
 #include <Atomic/Graphics/GraphicsEvents.h>
 #include <Atomic/Input/InputEvents.h>
 #include <Atomic/Resource/ResourceCache.h>
-#include "NuklearUI.h"
+#include "AtomicNuklearUI.h"
 #undef NK_IMPLEMENTATION
 
 using namespace std::placeholders;
