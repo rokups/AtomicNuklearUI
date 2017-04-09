@@ -70,6 +70,7 @@ NuklearUI::NuklearUI(Context* ctx)
     _nk.ctx.clip.userdata = nk_handle_ptr(0);
 
     nk_buffer_init_default(&_nk.commands);
+    ReallocateBuffers(1024, 1024);
 
     unsigned whiteOpaque = 0xffffffff;
     _null_texture->SetNumLevels(1);
