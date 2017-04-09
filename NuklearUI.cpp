@@ -20,7 +20,6 @@
 // THE SOFTWARE.
 //
 #define NK_IMPLEMENTATION 1
-#include <string.h>
 #include <SDL.h>
 #include <Atomic/Core/Context.h>
 #include <Atomic/Core/CoreEvents.h>
@@ -31,8 +30,9 @@
 #include "NuklearUI.h"
 #undef NK_IMPLEMENTATION
 
-using namespace Atomic;
 using namespace std::placeholders;
+namespace Atomic
+{
 
 struct nk_sdl_vertex
 {
@@ -47,10 +47,11 @@ void NuklearUI::ClipboardCopy(nk_handle usr, const char* text, int len)
     SDL_SetClipboardText(str.CString());
 }
 
-void NuklearUI::ClipboardPaste(nk_handle usr, struct nk_text_edit *edit)
+void NuklearUI::ClipboardPaste(nk_handle usr, struct nk_text_edit* edit)
 {
-    const char *text = SDL_GetClipboardText();
-    if (text) nk_textedit_paste(edit, text, nk_strlen(text));
+    const char* text = SDL_GetClipboardText();
+    if (text)
+        nk_textedit_paste(edit, text, nk_strlen(text));
     (void)usr;
 }
 
@@ -75,13 +76,6 @@ NuklearUI::NuklearUI(Context* ctx)
     _null_texture->SetSize(1, 1, Graphics::GetRGBAFormat());
     _null_texture->SetData(0, 0, 0, 1, 1, &whiteOpaque);
     _nk.null_texture.texture.ptr = _null_texture.Get();
-
-    PODVector<VertexElement> elems;
-    elems.Push(VertexElement(TYPE_VECTOR2, SEM_POSITION));
-    elems.Push(VertexElement(TYPE_VECTOR2, SEM_TEXCOORD));
-    elems.Push(VertexElement(TYPE_UBYTE4_NORM, SEM_COLOR));
-    _vertex_buffer->SetSize(MAX_VERTEX_MEMORY / sizeof(nk_sdl_vertex), elems, true);
-    _index_buffer->SetSize(MAX_ELEMENT_MEMORY / sizeof(unsigned short), false, true);
 
     static const struct nk_draw_vertex_layout_element vertex_layout[] = {
         {NK_VERTEX_POSITION, NK_FORMAT_FLOAT,    NK_OFFSETOF(struct nk_sdl_vertex, position)},
@@ -232,88 +226,94 @@ void NuklearUI::OnEndRendering()
     // Max. vertex / index count is not assumed to change later
     void* vertexData = _vertex_buffer->Lock(0, _vertex_buffer->GetVertexCount(), true);
     void* indexData = _index_buffer->Lock(0, _index_buffer->GetIndexCount(), true);
-    if (vertexData && indexData)
-    {
-        struct nk_buffer vbuf, ebuf;
-        nk_buffer_init_fixed(&vbuf, vertexData, nk_size(MAX_VERTEX_MEMORY));
-        nk_buffer_init_fixed(&ebuf, indexData, nk_size(MAX_ELEMENT_MEMORY));
-        nk_convert(&_nk.ctx, &_nk.commands, &vbuf, &ebuf, &_nk.config);
-
+    assert(vertexData && indexData);
+    struct nk_buffer vbuf, ebuf;
+    nk_buffer_init_fixed(&vbuf, vertexData, _vertex_buffer->GetVertexCount() * _vertex_buffer->GetVertexSize());
+    nk_buffer_init_fixed(&ebuf, indexData, _index_buffer->GetIndexCount() * _index_buffer->GetIndexSize());
+    nk_flags result = nk_convert(&_nk.ctx, &_nk.commands, &vbuf, &ebuf, &_nk.config);
 #if (defined(_WIN32) && !defined(ATOMIC_D3D11) && !defined(ATOMIC_OPENGL)) || defined(ATOMIC_D3D9)
-        for (int i = 0; i < _vertex_buffer->GetVertexCount(); i++)
-        {
-            nk_sdl_vertex* v = (nk_sdl_vertex*)vertexData + i;
-            v->position[0] += 0.5f;
-            v->position[1] += 0.5f;
-        }
-#endif
-
-        _graphics->ClearParameterSources();
-        _graphics->SetColorWrite(true);
-        _graphics->SetCullMode(CULL_NONE);
-        _graphics->SetDepthTest(CMP_ALWAYS);
-        _graphics->SetDepthWrite(false);
-        _graphics->SetFillMode(FILL_SOLID);
-        _graphics->SetStencilTest(false);
-        _graphics->SetVertexBuffer(_vertex_buffer);
-        _graphics->SetIndexBuffer(_index_buffer);
-        _vertex_buffer->Unlock();
-        _index_buffer->Unlock();
-
-        unsigned index = 0;
-        const struct nk_draw_command* cmd;
-        nk_draw_foreach(cmd, &_nk.ctx, &_nk.commands)
-        {
-            if (!cmd->elem_count)
-                continue;
-
-            ShaderVariation* ps;
-            ShaderVariation* vs;
-
-            Texture2D* texture = static_cast<Texture2D*>(cmd->texture.ptr);
-            if (!texture)
-            {
-                ps = _graphics->GetShader(PS, "Basic", "VERTEXCOLOR");
-                vs = _graphics->GetShader(VS, "Basic", "VERTEXCOLOR");
-            }
-            else
-            {
-                // If texture contains only an alpha channel, use alpha shader (for fonts)
-                vs = _graphics->GetShader(VS, "Basic", "DIFFMAP VERTEXCOLOR");
-                if (texture->GetFormat() == Graphics::GetAlphaFormat())
-                    ps = _graphics->GetShader(PS, "Basic", "ALPHAMAP VERTEXCOLOR");
-                else
-                    ps = _graphics->GetShader(PS, "Basic", "DIFFMAP VERTEXCOLOR");
-            }
-
-            _graphics->SetShaders(vs, ps);
-            if (_graphics->NeedParameterUpdate(SP_OBJECT, this))
-                _graphics->SetShaderParameter(VSP_MODEL, Matrix3x4::IDENTITY);
-            if (_graphics->NeedParameterUpdate(SP_CAMERA, this))
-                _graphics->SetShaderParameter(VSP_VIEWPROJ, _projection);
-            if (_graphics->NeedParameterUpdate(SP_MATERIAL, this))
-                _graphics->SetShaderParameter(PSP_MATDIFFCOLOR, Color(1.0f, 1.0f, 1.0f, 1.0f));
-
-            float elapsedTime = GetSubsystem<Time>()->GetElapsedTime();
-            _graphics->SetShaderParameter(VSP_ELAPSEDTIME, elapsedTime);
-            _graphics->SetShaderParameter(PSP_ELAPSEDTIME, elapsedTime);
-
-            IntRect scissor = IntRect(int(cmd->clip_rect.x), int(cmd->clip_rect.y),
-                                      int(cmd->clip_rect.x + cmd->clip_rect.w),
-                                      int(cmd->clip_rect.y + cmd->clip_rect.h));
-            scissor.left_ = int(scissor.left_ * _uiScale);
-            scissor.top_ = int(scissor.top_ * _uiScale);
-            scissor.right_ = int(scissor.right_ * _uiScale);
-            scissor.bottom_ = int(scissor.bottom_ * _uiScale);
-
-            _graphics->SetBlendMode(BLEND_ALPHA);
-            _graphics->SetScissorTest(true, scissor);
-            _graphics->SetTexture(0, texture);
-            _graphics->Draw(TRIANGLE_LIST, index, cmd->elem_count, 0, 0, _vertex_buffer->GetVertexCount());
-            index += cmd->elem_count;
-        }
-        nk_clear(&_nk.ctx);
+    for (int i = 0; i < _vertex_buffer->GetVertexCount(); i++)
+    {
+        nk_sdl_vertex* v = (nk_sdl_vertex*)vertexData + i;
+        v->position[0] += 0.5f;
+        v->position[1] += 0.5f;
     }
+#endif
+    _vertex_buffer->Unlock();
+    _index_buffer->Unlock();
+
+    _graphics->ClearParameterSources();
+    _graphics->SetColorWrite(true);
+    _graphics->SetCullMode(CULL_NONE);
+    _graphics->SetDepthTest(CMP_ALWAYS);
+    _graphics->SetDepthWrite(false);
+    _graphics->SetFillMode(FILL_SOLID);
+    _graphics->SetStencilTest(false);
+    _graphics->SetVertexBuffer(_vertex_buffer);
+    _graphics->SetIndexBuffer(_index_buffer);
+
+    unsigned index = 0;
+    const struct nk_draw_command* cmd;
+    nk_draw_foreach(cmd, &_nk.ctx, &_nk.commands)
+    {
+        if (!cmd->elem_count)
+            continue;
+
+        ShaderVariation* ps;
+        ShaderVariation* vs;
+
+        Texture2D* texture = static_cast<Texture2D*>(cmd->texture.ptr);
+        if (!texture)
+        {
+            ps = _graphics->GetShader(PS, "Basic", "VERTEXCOLOR");
+            vs = _graphics->GetShader(VS, "Basic", "VERTEXCOLOR");
+        }
+        else
+        {
+            // If texture contains only an alpha channel, use alpha shader (for fonts)
+            vs = _graphics->GetShader(VS, "Basic", "DIFFMAP VERTEXCOLOR");
+            if (texture->GetFormat() == Graphics::GetAlphaFormat())
+                ps = _graphics->GetShader(PS, "Basic", "ALPHAMAP VERTEXCOLOR");
+            else
+                ps = _graphics->GetShader(PS, "Basic", "DIFFMAP VERTEXCOLOR");
+        }
+
+        _graphics->SetShaders(vs, ps);
+        if (_graphics->NeedParameterUpdate(SP_OBJECT, this))
+            _graphics->SetShaderParameter(VSP_MODEL, Matrix3x4::IDENTITY);
+        if (_graphics->NeedParameterUpdate(SP_CAMERA, this))
+            _graphics->SetShaderParameter(VSP_VIEWPROJ, _projection);
+        if (_graphics->NeedParameterUpdate(SP_MATERIAL, this))
+            _graphics->SetShaderParameter(PSP_MATDIFFCOLOR, Color(1.0f, 1.0f, 1.0f, 1.0f));
+
+        float elapsedTime = GetSubsystem<Time>()->GetElapsedTime();
+        _graphics->SetShaderParameter(VSP_ELAPSEDTIME, elapsedTime);
+        _graphics->SetShaderParameter(PSP_ELAPSEDTIME, elapsedTime);
+
+        IntRect scissor = IntRect(int(cmd->clip_rect.x), int(cmd->clip_rect.y),
+                                  int(cmd->clip_rect.x + cmd->clip_rect.w),
+                                  int(cmd->clip_rect.y + cmd->clip_rect.h));
+        scissor.left_ = int(scissor.left_ * _uiScale);
+        scissor.top_ = int(scissor.top_ * _uiScale);
+        scissor.right_ = int(scissor.right_ * _uiScale);
+        scissor.bottom_ = int(scissor.bottom_ * _uiScale);
+
+        _graphics->SetBlendMode(BLEND_ALPHA);
+        _graphics->SetScissorTest(true, scissor);
+        _graphics->SetTexture(0, texture);
+        _graphics->Draw(TRIANGLE_LIST, index, cmd->elem_count, 0, 0, _vertex_buffer->GetVertexCount());
+        index += cmd->elem_count;
+    }
+
+    // FIXME: Last frame was rendered incomplete or contained artifacts. We allocate more memory hoping to fit all the
+    // needed data on the next frame. Reallocation and nk_convert() should be retried as much as needed, however doing
+    // so _nk.commands overrun.
+    if (result & NK_CONVERT_VERTEX_BUFFER_FULL)
+        ReallocateBuffers((unsigned int)((vbuf.needed / _vertex_buffer->GetVertexSize()) * 2), 0);
+    if (result & NK_CONVERT_ELEMENT_BUFFER_FULL)
+        ReallocateBuffers(0, (unsigned int)((ebuf.needed / _index_buffer->GetIndexSize()) * 2));
+
+    nk_clear(&_nk.ctx);
     _graphics->SetScissorTest(false);
 }
 
@@ -380,4 +380,19 @@ void NuklearUI::EndAddFonts()
     nk_font_atlas_end(&_nk.atlas, nk_handle_ptr(_font_texture.Get()), &_nk.null_texture);
     if (_nk.atlas.default_font)
         nk_style_set_font(&_nk.ctx, &_nk.atlas.default_font->handle);
+}
+
+void NuklearUI::ReallocateBuffers(unsigned int vertex_count, unsigned int index_count)
+{
+    if (vertex_count)
+    {
+        PODVector<VertexElement> elems;
+        elems.Push(VertexElement(TYPE_VECTOR2, SEM_POSITION));
+        elems.Push(VertexElement(TYPE_VECTOR2, SEM_TEXCOORD));
+        elems.Push(VertexElement(TYPE_UBYTE4_NORM, SEM_COLOR));
+        _vertex_buffer->SetSize(vertex_count, elems, true);
+    }
+    _index_buffer->SetSize(index_count, false, true);
+}
+
 }

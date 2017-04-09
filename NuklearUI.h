@@ -30,10 +30,13 @@
 
 #define NK_POINTER_HASH(p) (((int32_t)((size_t)p & 0xFFFFFFFF)) ^ (int32_t)((size_t)p >> 32))
 
+namespace Atomic
+{
+
 class NuklearUI
     : public Atomic::Object
 {
-    ATOMIC_OBJECT(NuklearUI, Atomic::Object);
+ATOMIC_OBJECT(NuklearUI, Atomic::Object);
 public:
     NuklearUI(Atomic::Context* ctx);
     virtual ~NuklearUI();
@@ -45,11 +48,16 @@ public:
     /// Get nuklear font atlas.
     struct nk_font_atlas* GetFontAtlas() { return &_nk.atlas; }
     /// Get nuklear ui scale.
-    void SetScale(float scale) { _uiScale = scale; UpdateProjectionMatrix(); }
+    void SetScale(float scale)
+    {
+        _uiScale = scale;
+        UpdateProjectionMatrix();
+    }
+
     /// Set nuklear ui scale.
     float GetScale() const { return _uiScale; }
-
-    void BeginAddFonts(float default_font_size=13.f);
+    /// Begin adding fonts.
+    void BeginAddFonts(float default_font_size = 13.f);
     //! Add font to imgui subsystem.
     /*!
       \param font_path a string pointing to TTF font resource.
@@ -58,6 +66,7 @@ public:
       \return ImFont instance that may be used for setting current font when drawing GUI.
     */
     nk_font* AddFont(const Atomic::String& font_path, float size, const nk_rune* ranges);
+    /// End adding fonts.
     void EndAddFonts();
 
 protected:
@@ -67,12 +76,10 @@ protected:
     void OnEndRendering();
 
     static void ClipboardCopy(nk_handle usr, const char* text, int len);
-    static void ClipboardPaste(nk_handle usr, struct nk_text_edit *edit);
+    static void ClipboardPaste(nk_handle usr, struct nk_text_edit* edit);
 
     void UpdateProjectionMatrix();
-
-    const int MAX_VERTEX_MEMORY = 5 * 1024 * 1024;
-    const int MAX_ELEMENT_MEMORY = 5 * 1024 * 1024;
+    void ReallocateBuffers(unsigned int vertex_count, unsigned int index_count);
 
     struct
     {
@@ -91,4 +98,4 @@ protected:
     float _uiScale = 1.0f;
 };
 
-
+}
