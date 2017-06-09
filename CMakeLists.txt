@@ -33,3 +33,6 @@ target_compile_definitions(AtomicNuklearUI
 )
 target_link_libraries(AtomicNuklearUI Atomic)
 target_include_directories(AtomicNuklearUI PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+if (NOT MSVC)
+    target_compile_options(AtomicNuklearUI PUBLIC -std=c++11)
+endif ()
