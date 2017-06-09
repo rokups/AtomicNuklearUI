@@ -1,24 +1,27 @@
-//
-// Copyright (c) 2016 Rokas Kupstys
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
-//
+/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2017 Rokas Kupstys
+ * Copyright (c) 2008-2016 the Urho3D project.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 #define NK_IMPLEMENTATION 1
 #include <SDL.h>
 #include <Atomic/Core/Context.h>
@@ -27,6 +30,8 @@
 #include <Atomic/Graphics/GraphicsEvents.h>
 #include <Atomic/Input/InputEvents.h>
 #include <Atomic/Resource/ResourceCache.h>
+#include <AtomicGameEngine/Source/Atomic/Core/Profiler.h>
+#include <AtomicGameEngine/Source/Atomic/IO/Log.h>
 #include "AtomicNuklearUI.h"
 #undef NK_IMPLEMENTATION
 
@@ -55,8 +60,8 @@ void NuklearUI::ClipboardPaste(nk_handle usr, struct nk_text_edit* edit)
     (void)usr;
 }
 
-NuklearUI::NuklearUI(Context* ctx)
-    : Object(ctx)
+NuklearUI::NuklearUI(Context* context)
+    : Object(context)
 {
     _graphics = GetSubsystem<Graphics>();
 
@@ -64,19 +69,20 @@ NuklearUI::NuklearUI(Context* ctx)
     _vertex_buffer = new VertexBuffer(context_);
     _null_texture = context_->CreateObject<Texture2D>();
 
-    nk_init_default(&_nk.ctx, 0);
-    _nk.ctx.clip.copy = &ClipboardCopy;
-    _nk.ctx.clip.paste = &ClipboardPaste;
-    _nk.ctx.clip.userdata = nk_handle_ptr(0);
+    nk_init_default(&_nk, 0);
+    nk_font_atlas_init_default(&_atlas);
+    _nk.clip.copy = &ClipboardCopy;
+    _nk.clip.paste = &ClipboardPaste;
+    _nk.clip.userdata = nk_handle_ptr(0);
 
-    nk_buffer_init_default(&_nk.commands);
+    nk_buffer_init_default(&_commands);
     ReallocateBuffers(1024, 1024);
 
     unsigned whiteOpaque = 0xffffffff;
     _null_texture->SetNumLevels(1);
     _null_texture->SetSize(1, 1, Graphics::GetRGBAFormat());
     _null_texture->SetData(0, 0, 0, 1, 1, &whiteOpaque);
-    _nk.null_texture.texture.ptr = _null_texture.Get();
+    _draw_null_texture.texture.ptr = _null_texture.Get();
 
     static const struct nk_draw_vertex_layout_element vertex_layout[] = {
         {NK_VERTEX_POSITION, NK_FORMAT_FLOAT,    NK_OFFSETOF(struct nk_sdl_vertex, position)},
@@ -84,20 +90,24 @@ NuklearUI::NuklearUI(Context* ctx)
         {NK_VERTEX_COLOR,    NK_FORMAT_R8G8B8A8, NK_OFFSETOF(struct nk_sdl_vertex, col)},
         {NK_VERTEX_LAYOUT_END}
     };
-    NK_MEMSET(&_nk.config, 0, sizeof(_nk.config));
-    _nk.config.vertex_layout = vertex_layout;
-    _nk.config.vertex_size = sizeof(struct nk_sdl_vertex);
-    _nk.config.vertex_alignment = NK_ALIGNOF(struct nk_sdl_vertex);
-    _nk.config.null = _nk.null_texture;
-    _nk.config.circle_segment_count = 22;
-    _nk.config.curve_segment_count = 22;
-    _nk.config.arc_segment_count = 22;
-    _nk.config.global_alpha = 1.0f;
-    _nk.config.shape_AA = NK_ANTI_ALIASING_ON;
-    _nk.config.line_AA = NK_ANTI_ALIASING_ON;
+    NK_MEMSET(&_config, 0, sizeof(_config));
+    _config.vertex_layout = vertex_layout;
+    _config.vertex_size = sizeof(struct nk_sdl_vertex);
+    _config.vertex_alignment = NK_ALIGNOF(struct nk_sdl_vertex);
+    _config.null = _draw_null_texture;
+    _config.circle_segment_count = 22;
+    _config.curve_segment_count = 22;
+    _config.arc_segment_count = 22;
+    _config.global_alpha = 1.0f;
+    _config.shape_AA = NK_ANTI_ALIASING_ON;
+    _config.line_AA = NK_ANTI_ALIASING_ON;
 
     UpdateProjectionMatrix();
 
+    SubscribeToEvent(E_POSTUPDATE, [=](StringHash, VariantMap&) {
+        ATOMIC_PROFILE(NuklearFrame);
+        SendEvent(E_NUKLEARFRAME);
+    });
     SubscribeToEvent(E_INPUTBEGIN, std::bind(&NuklearUI::OnInputBegin, this));
     SubscribeToEvent(E_SDLRAWINPUT, std::bind(&NuklearUI::OnRawEvent, this, _2));
     SubscribeToEvent(E_INPUTEND, std::bind(&NuklearUI::OnInputEnd, this));
@@ -108,119 +118,182 @@ NuklearUI::NuklearUI(Context* ctx)
 NuklearUI::~NuklearUI()
 {
     UnsubscribeFromAllEvents();
-    nk_font_atlas_clear(&_nk.atlas);
-    nk_free(&_nk.ctx);
+    nk_font_atlas_clear(&_atlas);
+    nk_free(&_nk);
 }
 
 void NuklearUI::OnInputBegin()
 {
-    nk_input_begin(&_nk.ctx);
+    nk_input_begin(&_nk);
 }
 
 void NuklearUI::OnRawEvent(VariantMap& args)
 {
     auto evt = static_cast<SDL_Event*>(args[SDLRawInput::P_SDLEVENT].Get<void*>());
-    auto ctx = &_nk.ctx;
-    if (evt->type == SDL_KEYUP || evt->type == SDL_KEYDOWN)
+    switch (evt->type)
+    {
+    case SDL_KEYUP:
+    case SDL_KEYDOWN:
     {
         int down = evt->type == SDL_KEYDOWN;
         const Uint8* state = SDL_GetKeyboardState(0);
         SDL_Keycode sym = evt->key.keysym.sym;
-        if (sym == SDLK_RSHIFT || sym == SDLK_LSHIFT)
-            nk_input_key(ctx, NK_KEY_SHIFT, down);
-        else if (sym == SDLK_DELETE)
-            nk_input_key(ctx, NK_KEY_DEL, down);
-        else if (sym == SDLK_RETURN)
-            nk_input_key(ctx, NK_KEY_ENTER, down);
-        else if (sym == SDLK_TAB)
-            nk_input_key(ctx, NK_KEY_TAB, down);
-        else if (sym == SDLK_BACKSPACE)
-            nk_input_key(ctx, NK_KEY_BACKSPACE, down);
-        else if (sym == SDLK_HOME)
+        switch (sym)
         {
-            nk_input_key(ctx, NK_KEY_TEXT_START, down);
-            nk_input_key(ctx, NK_KEY_SCROLL_START, down);
-        }
-        else if (sym == SDLK_END)
-        {
-            nk_input_key(ctx, NK_KEY_TEXT_END, down);
-            nk_input_key(ctx, NK_KEY_SCROLL_END, down);
-        }
-        else if (sym == SDLK_PAGEDOWN)
-            nk_input_key(ctx, NK_KEY_SCROLL_DOWN, down);
-        else if (sym == SDLK_PAGEUP)
-            nk_input_key(ctx, NK_KEY_SCROLL_UP, down);
-        else if (sym == SDLK_z)
-            nk_input_key(ctx, NK_KEY_TEXT_UNDO, down && state[SDL_SCANCODE_LCTRL]);
-        else if (sym == SDLK_r)
-            nk_input_key(ctx, NK_KEY_TEXT_REDO, down && state[SDL_SCANCODE_LCTRL]);
-        else if (sym == SDLK_c)
-            nk_input_key(ctx, NK_KEY_COPY, down && state[SDL_SCANCODE_LCTRL]);
-        else if (sym == SDLK_v)
-            nk_input_key(ctx, NK_KEY_PASTE, down && state[SDL_SCANCODE_LCTRL]);
-        else if (sym == SDLK_x)
-            nk_input_key(ctx, NK_KEY_CUT, down && state[SDL_SCANCODE_LCTRL]);
-        else if (sym == SDLK_b)
-            nk_input_key(ctx, NK_KEY_TEXT_LINE_START, down && state[SDL_SCANCODE_LCTRL]);
-        else if (sym == SDLK_e)
-            nk_input_key(ctx, NK_KEY_TEXT_LINE_END, down && state[SDL_SCANCODE_LCTRL]);
-        else if (sym == SDLK_UP)
-            nk_input_key(ctx, NK_KEY_UP, down);
-        else if (sym == SDLK_DOWN)
-            nk_input_key(ctx, NK_KEY_DOWN, down);
-        else if (sym == SDLK_LEFT)
-        {
+        case SDLK_RSHIFT:
+        case SDLK_LSHIFT:
+            nk_input_key(&_nk, NK_KEY_SHIFT, down);
+            break;
+        case SDLK_DELETE:
+            nk_input_key(&_nk, NK_KEY_DEL, down);
+            break;
+        case SDLK_RETURN:
+            nk_input_key(&_nk, NK_KEY_ENTER, down);
+            break;
+        case SDLK_TAB:
+            nk_input_key(&_nk, NK_KEY_TAB, down);
+            break;
+        case SDLK_BACKSPACE:
+            nk_input_key(&_nk, NK_KEY_BACKSPACE, down);
+            break;
+        case SDLK_HOME:
+            nk_input_key(&_nk, NK_KEY_TEXT_START, down);
+            nk_input_key(&_nk, NK_KEY_SCROLL_START, down);
+            break;
+        case SDLK_END:
+            nk_input_key(&_nk, NK_KEY_TEXT_END, down);
+            nk_input_key(&_nk, NK_KEY_SCROLL_END, down);
+            break;
+        case SDLK_PAGEDOWN:
+            nk_input_key(&_nk, NK_KEY_SCROLL_DOWN, down);
+            break;
+        case SDLK_PAGEUP:
+            nk_input_key(&_nk, NK_KEY_SCROLL_UP, down);
+            break;
+        case SDLK_z:
+            nk_input_key(&_nk, NK_KEY_TEXT_UNDO, down && state[SDL_SCANCODE_LCTRL]);
+            break;
+        case SDLK_r:
+            nk_input_key(&_nk, NK_KEY_TEXT_REDO, down && state[SDL_SCANCODE_LCTRL]);
+            break;
+        case SDLK_c:
+            nk_input_key(&_nk, NK_KEY_COPY, down && state[SDL_SCANCODE_LCTRL]);
+            break;
+        case SDLK_v:
+            nk_input_key(&_nk, NK_KEY_PASTE, down && state[SDL_SCANCODE_LCTRL]);
+            break;
+        case SDLK_x:
+            nk_input_key(&_nk, NK_KEY_CUT, down && state[SDL_SCANCODE_LCTRL]);
+            break;
+        case SDLK_b:
+            nk_input_key(&_nk, NK_KEY_TEXT_LINE_START, down && state[SDL_SCANCODE_LCTRL]);
+            break;
+        case SDLK_e:
+            nk_input_key(&_nk, NK_KEY_TEXT_LINE_END, down && state[SDL_SCANCODE_LCTRL]);
+            break;
+        case SDLK_UP:
+            nk_input_key(&_nk, NK_KEY_UP, down);
+            break;
+        case SDLK_DOWN:
+            nk_input_key(&_nk, NK_KEY_DOWN, down);
+            break;
+        case SDLK_LEFT:
             if (state[SDL_SCANCODE_LCTRL])
-                nk_input_key(ctx, NK_KEY_TEXT_WORD_LEFT, down);
+                nk_input_key(&_nk, NK_KEY_TEXT_WORD_LEFT, down);
             else
-                nk_input_key(ctx, NK_KEY_LEFT, down);
-        }
-        else if (sym == SDLK_RIGHT)
-        {
+                nk_input_key(&_nk, NK_KEY_LEFT, down);
+            break;
+        case SDLK_RIGHT:
             if (state[SDL_SCANCODE_LCTRL])
-                nk_input_key(ctx, NK_KEY_TEXT_WORD_RIGHT, down);
+                nk_input_key(&_nk, NK_KEY_TEXT_WORD_RIGHT, down);
             else
-                nk_input_key(ctx, NK_KEY_RIGHT, down);
+                nk_input_key(&_nk, NK_KEY_RIGHT, down);
+            break;
+        default:
+            break;
         }
+        break;
     }
-    else if (evt->type == SDL_MOUSEBUTTONDOWN || evt->type == SDL_MOUSEBUTTONUP)
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+        nk_input_button(&_nk,
+                        (nk_buttons)(evt->button.button - 1),
+                        (const int)(evt->button.x / _uiScale),
+                        (const int)(evt->button.y / _uiScale),
+                        evt->type == SDL_MOUSEBUTTONDOWN);
+        break;
+    case SDL_MOUSEWHEEL:
+        nk_input_scroll(&_nk, {(float)evt->wheel.x, (float)evt->wheel.y});
+        break;
+    case SDL_MOUSEMOTION:
     {
-        int down = evt->type == SDL_MOUSEBUTTONDOWN;
-        const int x = (const int)(evt->button.x / _uiScale), y = (const int)(evt->button.y / _uiScale);
-        if (evt->button.button == SDL_BUTTON_LEFT)
-            nk_input_button(ctx, NK_BUTTON_LEFT, x, y, down);
-        if (evt->button.button == SDL_BUTTON_MIDDLE)
-            nk_input_button(ctx, NK_BUTTON_MIDDLE, x, y, down);
-        if (evt->button.button == SDL_BUTTON_RIGHT)
-            nk_input_button(ctx, NK_BUTTON_RIGHT, x, y, down);
-    }
-    else if (evt->type == SDL_MOUSEMOTION)
-    {
-        if (ctx->input.mouse.grabbed)
+        if (_nk.input.mouse.grabbed)
         {
-            int x = (int)ctx->input.mouse.prev.x, y = (int)ctx->input.mouse.prev.y;
-            nk_input_motion(ctx, (int)(x + evt->motion.xrel / _uiScale), (int)(y + evt->motion.yrel / _uiScale));
+            nk_input_motion(&_nk,
+                            (int)(_nk.input.mouse.prev.x + evt->motion.xrel / _uiScale),
+                            (int)(_nk.input.mouse.prev.y + evt->motion.yrel / _uiScale));
         }
         else
-            nk_input_motion(ctx, (int)(evt->motion.x / _uiScale), (int)(evt->motion.y / _uiScale));
+            nk_input_motion(&_nk, (int)(evt->motion.x / _uiScale), (int)(evt->motion.y / _uiScale));
+        break;
     }
-    else if (evt->type == SDL_TEXTINPUT)
+    case SDL_FINGERUP:
+        nk_input_button(&_nk, NK_BUTTON_LEFT, -1, -1, 0);
+        break;
+    case SDL_FINGERDOWN:
+        nk_input_button(&_nk, NK_BUTTON_LEFT, (int)(evt->tfinger.x / _uiScale), (int)(evt->tfinger.y / _uiScale), 1);
+        break;
+    case SDL_FINGERMOTION:
+        if (_nk.input.mouse.grabbed)
+        {
+            nk_input_motion(&_nk,
+                            (int)(_nk.input.mouse.prev.x + evt->tfinger.dx / _uiScale),
+                            (int)(_nk.input.mouse.prev.y + evt->tfinger.dy / _uiScale));
+        }
+        else
+            nk_input_motion(&_nk, (int)(evt->tfinger.x / _uiScale), (int)(evt->tfinger.y / _uiScale));
+        break;
+    case SDL_TEXTINPUT:
     {
         nk_glyph glyph = {};
         memcpy(glyph, evt->text.text, NK_UTF_SIZE);
-        nk_input_glyph(ctx, glyph);
+        nk_input_glyph(&_nk, glyph);
+        break;
     }
-    else if (evt->type == SDL_MOUSEWHEEL)
-        nk_input_scroll(ctx, {(float)evt->wheel.x, (float)evt->wheel.y});
+    default:
+        break;
+    }
+
+    switch (evt->type)
+    {
+    case SDL_KEYUP:
+    case SDL_KEYDOWN:
+    case SDL_TEXTINPUT:
+        // is any item active, but not necessarily hovered.
+        args[SDLRawInput::P_CONSUMED] = (_nk.last_widget_state & NK_WIDGET_STATE_MODIFIED);
+        break;
+    case SDL_MOUSEWHEEL:
+    case SDL_MOUSEBUTTONUP:
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEMOTION:
+    case SDL_FINGERUP:
+    case SDL_FINGERDOWN:
+    case SDL_FINGERMOTION:
+        args[SDLRawInput::P_CONSUMED] = nk_window_is_any_hovered(&_nk);
+        break;
+    default:
+        break;
+    }
 }
 
 void NuklearUI::OnInputEnd()
 {
-    nk_input_end(&_nk.ctx);
+    nk_input_end(&_nk);
 }
 
 void NuklearUI::OnEndRendering()
 {
+    ATOMIC_PROFILE(NuklearRenderDrawLists);
     // Engine does not render when window is closed or device is lost
     assert(_graphics && _graphics->IsInitialized() && !_graphics->IsDeviceLost());
 
@@ -228,10 +301,11 @@ void NuklearUI::OnEndRendering()
     void* vertexData = _vertex_buffer->Lock(0, _vertex_buffer->GetVertexCount(), true);
     void* indexData = _index_buffer->Lock(0, _index_buffer->GetIndexCount(), true);
     assert(vertexData && indexData);
+
     struct nk_buffer vbuf, ebuf;
     nk_buffer_init_fixed(&vbuf, vertexData, _vertex_buffer->GetVertexCount() * _vertex_buffer->GetVertexSize());
     nk_buffer_init_fixed(&ebuf, indexData, _index_buffer->GetIndexCount() * _index_buffer->GetIndexSize());
-    nk_flags result = nk_convert(&_nk.ctx, &_nk.commands, &vbuf, &ebuf, &_nk.config);
+    nk_flags result = nk_convert(&_nk, &_commands, &vbuf, &ebuf, &_config);
 #if (defined(_WIN32) && !defined(ATOMIC_D3D11) && !defined(ATOMIC_OPENGL)) || defined(ATOMIC_D3D9)
     for (int i = 0; i < _vertex_buffer->GetVertexCount(); i++)
     {
@@ -255,7 +329,7 @@ void NuklearUI::OnEndRendering()
 
     unsigned index = 0;
     const struct nk_draw_command* cmd;
-    nk_draw_foreach(cmd, &_nk.ctx, &_nk.commands)
+    nk_draw_foreach(cmd, &_nk, &_commands)
     {
         if (!cmd->elem_count)
             continue;
@@ -308,13 +382,13 @@ void NuklearUI::OnEndRendering()
 
     // FIXME: Last frame was rendered incomplete or contained artifacts. We allocate more memory hoping to fit all the
     // needed data on the next frame. Reallocation and nk_convert() should be retried as much as needed, however doing
-    // so _nk.commands overrun.
+    // so commands overrun.
     if (result & NK_CONVERT_VERTEX_BUFFER_FULL)
         ReallocateBuffers((unsigned int)((vbuf.needed / _vertex_buffer->GetVertexSize()) * 2), 0);
     if (result & NK_CONVERT_ELEMENT_BUFFER_FULL)
         ReallocateBuffers(0, (unsigned int)((ebuf.needed / _index_buffer->GetIndexSize()) * 2));
 
-    nk_clear(&_nk.ctx);
+    nk_clear(&_nk);
     _graphics->SetScissorTest(false);
 }
 
@@ -335,22 +409,24 @@ void NuklearUI::UpdateProjectionMatrix()
     _projection.m33_ = 1.0f;
 }
 
-void NuklearUI::BeginAddFonts(float default_font_size)
+void NuklearUI::AddDefaultFont(float default_font_size)
 {
-    nk_font_atlas_init_default(&_nk.atlas);
-    nk_font_atlas_begin(&_nk.atlas);
+    nk_font_atlas_begin(&_atlas);
     if (default_font_size > 0)
-        _nk.atlas.default_font = nk_font_atlas_add_default(&_nk.atlas, default_font_size, 0);
+    {
+        _atlas.default_font = nk_font_atlas_add_default(&_atlas, default_font_size, 0);
+        ReallocateFontTexture();
+    }
 }
 
-nk_font* NuklearUI::AddFont(const Atomic::String& font_path, float size, const nk_rune* ranges)
+nk_font* NuklearUI::AddFont(const Atomic::String& font_path, float size, const nk_rune* ranges, NKUI_FontFlags flags)
 {
     if (size == 0)
     {
-        if (_nk.ctx.style.font != 0)
-            size = _nk.ctx.style.font->height;
-        else if (_nk.atlas.default_font != 0)
-            size = _nk.atlas.default_font->config->size;
+        if (_nk.style.font != 0)
+            size = _nk.style.font->height;
+        else if (_atlas.default_font != 0)
+            size = _atlas.default_font->config->size;
         else
             return 0;
     }
@@ -363,24 +439,41 @@ nk_font* NuklearUI::AddFont(const Atomic::String& font_path, float size, const n
 
         struct nk_font_config config = nk_font_config(size);
         config.range = ranges;
-        return nk_font_atlas_add_from_memory(&_nk.atlas, &data.Front(), bytes_len, size, &config);
+        config.ttf_data_owned_by_atlas = 0;
+        if (flags & NKUI_FONT_MERGE)
+        {
+            config.merge_mode = 1;                 // always merges with last added font
+            config.font = &_atlas.fonts->info;     // baked font required, otherwise this will fail.
+            config.coord_type = NK_COORD_PIXEL;
+        }
+        auto result = nk_font_atlas_add_from_memory(&_atlas, &data.Front(), bytes_len, size, &config);
+        if (flags & NKUI_FONT_SET_DEFAULT)
+            _atlas.default_font = result;
+        ReallocateFontTexture();
+        return result;
     }
     return 0;
 }
 
-void NuklearUI::EndAddFonts()
+nk_font* NuklearUI::AddFont(const Atomic::String& font_path, float size, const std::initializer_list<nk_rune>& ranges,
+                            NKUI_FontFlags flags)
+{
+    return AddFont(font_path, size, ranges.size() ? &*ranges.begin() : 0, flags);
+}
+
+void NuklearUI::ReallocateFontTexture()
 {
     int w, h;
-    const void* image = nk_font_atlas_bake(&_nk.atlas, &w, &h, NK_FONT_ATLAS_RGBA32);
+    const void* image = nk_font_atlas_bake(&_atlas, &w, &h, NK_FONT_ATLAS_RGBA32);
 
     _font_texture = context_->CreateObject<Texture2D>();
     _font_texture->SetNumLevels(1);
     _font_texture->SetSize(w, h, Graphics::GetRGBAFormat());
     _font_texture->SetData(0, 0, 0, w, h, image);
 
-    nk_font_atlas_end(&_nk.atlas, nk_handle_ptr(_font_texture.Get()), &_nk.null_texture);
-    if (_nk.atlas.default_font)
-        nk_style_set_font(&_nk.ctx, &_nk.atlas.default_font->handle);
+    nk_font_atlas_end(&_atlas, nk_handle_ptr(_font_texture.Get()), &_draw_null_texture);
+    if (_atlas.default_font)
+        nk_style_set_font(&_nk, &_atlas.default_font->handle);
 }
 
 void NuklearUI::ReallocateBuffers(unsigned int vertex_count, unsigned int index_count)
@@ -393,7 +486,16 @@ void NuklearUI::ReallocateBuffers(unsigned int vertex_count, unsigned int index_
         elems.Push(VertexElement(TYPE_UBYTE4_NORM, SEM_COLOR));
         _vertex_buffer->SetSize(vertex_count, elems, true);
     }
-    _index_buffer->SetSize(index_count, false, true);
+    if (index_count)
+        _index_buffer->SetSize(index_count, false, true);
+}
+
+void NuklearUI::SetScale(float scale)
+{
+    if (_uiScale == scale)
+        return;
+    _uiScale = scale;
+    UpdateProjectionMatrix();
 }
 
 }

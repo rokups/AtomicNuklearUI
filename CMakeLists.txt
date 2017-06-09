@@ -19,7 +19,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 #
-add_library (AtomicNuklearUI STATIC AtomicNuklearUI.h AtomicNuklearUI.cpp nuklear/nuklear.h)
+add_library(AtomicNuklearUI STATIC AtomicNuklearUI.h AtomicNuklearUI.cpp nuklear/nuklear.h)
 target_compile_definitions(AtomicNuklearUI
     PUBLIC
     -DNK_INCLUDE_VERTEX_BUFFER_OUTPUT=1
@@ -29,5 +29,7 @@ target_compile_definitions(AtomicNuklearUI
     -DNK_INCLUDE_STANDARD_IO=1
     -DNK_INCLUDE_FIXED_TYPES=1
     -DNK_INCLUDE_DEFAULT_ALLOCATOR=1
+    -DNK_INCLUDE_STANDARD_VARARGS=1
 )
-target_link_libraries (AtomicNuklearUI Atomic)
+target_link_libraries(AtomicNuklearUI Atomic)
+target_include_directories(AtomicNuklearUI PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
