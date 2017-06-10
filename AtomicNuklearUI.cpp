@@ -30,8 +30,8 @@
 #include <Atomic/Graphics/GraphicsEvents.h>
 #include <Atomic/Input/InputEvents.h>
 #include <Atomic/Resource/ResourceCache.h>
-#include <AtomicGameEngine/Source/Atomic/Core/Profiler.h>
-#include <AtomicGameEngine/Source/Atomic/IO/Log.h>
+#include <Atomic/Core/Profiler.h>
+#include <Atomic/IO/Log.h>
 #include "AtomicNuklearUI.h"
 #undef NK_IMPLEMENTATION
 
