@@ -365,13 +365,9 @@ void NuklearUI::OnEndRendering()
         _graphics->SetShaderParameter(VSP_ELAPSEDTIME, elapsedTime);
         _graphics->SetShaderParameter(PSP_ELAPSEDTIME, elapsedTime);
 
-        IntRect scissor = IntRect(int(cmd->clip_rect.x), int(cmd->clip_rect.y),
-                                  int(cmd->clip_rect.x + cmd->clip_rect.w),
-                                  int(cmd->clip_rect.y + cmd->clip_rect.h));
-        scissor.left_ = int(scissor.left_ * _uiScale);
-        scissor.top_ = int(scissor.top_ * _uiScale);
-        scissor.right_ = int(scissor.right_ * _uiScale);
-        scissor.bottom_ = int(scissor.bottom_ * _uiScale);
+        IntRect scissor = IntRect(int(cmd->clip_rect.x * _uiScale), int(cmd->clip_rect.y * _uiScale),
+                                  int((cmd->clip_rect.x + cmd->clip_rect.w) * _uiScale),
+                                  int((cmd->clip_rect.y + cmd->clip_rect.h) * _uiScale));
 
         _graphics->SetBlendMode(BLEND_ALPHA);
         _graphics->SetScissorTest(true, scissor);
